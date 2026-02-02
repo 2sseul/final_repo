@@ -1,128 +1,105 @@
-// src/pages/RecipeResult/RecipeResultPage.jsx
-import { useLocation, useNavigate } from "react-router-dom";
+// src/pages/Recipe/RecipeResultPage.jsx
+import { useNavigate, useLocation } from "react-router-dom";
+import { useState } from "react";
+import RecipeLayout from "@/layouts/RecipeLayout";
+import ButtonRed from "@/components/ButtonRed";
+import ButtonWhite from "@/components/ButtonWhite";
 import "./RecipeResultPage.css";
 
 export default function RecipeResultPage() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const { recipe, memberInfo, chatHistory } = location.state || {};
+  const location = useLocation();
+  const { recipe, userId, title, constraints, memberInfo, chatHistory } =
+    location.state || {};
+
+  const [remainingCount, setRemainingCount] = useState(1);
 
   if (!recipe) {
-    return (
-      <div className="error-page">
-        <h2>레시피 정보가 없습니다</h2>
-        <button onClick={() => navigate("/chat")}>돌아가기</button>
-      </div>
-    );
+    console.error("[RecipeResultPage] 레시피 데이터 없음");
+    navigate("/home", { replace: true });
+    return null;
   }
 
+  console.log("[RecipeResultPage] 받은 레시피:", recipe);
+
+  const handleRegenerate = () => {
+    if (remainingCount > 0) {
+      setRemainingCount(remainingCount - 1);
+
+      navigate("/loading", {
+        state: {
+          memberInfo,
+          chatHistory,
+        },
+      });
+    }
+  };
+
+  const handleStartCooking = () => {
+    navigate("/cook", {
+      state: {
+        recipe: {
+          name: recipe.title,
+          intro: recipe.intro,
+          time: recipe.cook_time,
+          level: recipe.level,
+          servings: recipe.servings,
+          ingredients: recipe.ingredients,
+          steps: recipe.steps,
+        },
+      },
+    });
+  };
+
   return (
-    <div className="recipe-result-page">
-      <div className="recipe-header">
-        <button className="back-button" onClick={() => navigate("/chat")}>
-          ← 돌아가기
-        </button>
-        <h1>{recipe.title}</h1>
+    <RecipeLayout steps={recipe.steps || []} currentStep={1}>
+      {/* 타이틀 */}
+      <div className="result-title-section">
+        <p className="result-subtitle">오늘의 추천 레시피는</p>
+        <h1 className="result-title">
+          <span className="highlight">{recipe.title}</span> 입니다
+        </h1>
       </div>
 
-      <div className="recipe-content">
-        {/* 메타 정보 */}
-        <div className="recipe-meta">
-          <div className="meta-item">
-            <span className="label">조리시간</span>
-            <span className="value">{recipe.cook_time}</span>
-          </div>
-          <div className="meta-item">
-            <span className="label">난이도</span>
-            <span className="value">{recipe.level}</span>
-          </div>
-          <div className="meta-item">
-            <span className="label">분량</span>
-            <span className="value">{recipe.servings}</span>
-          </div>
-        </div>
-
-        {/* 소개 */}
-        {recipe.intro && (
-          <div className="recipe-intro">
-            <p>{recipe.intro}</p>
-          </div>
-        )}
-
-        {/* 재료 */}
-        <div className="recipe-section">
-          <h2>🥘 재료</h2>
-          <ul className="ingredients-list">
-            {recipe.ingredients?.map((ing, idx) => (
-              <li key={idx}>
-                <span className="ing-name">{ing.name}</span>
-                <span className="ing-amount">{ing.amount}</span>
-                {ing.note && <span className="ing-note">({ing.note})</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* 조리법 */}
-        <div className="recipe-section">
-          <h2>👨‍🍳 조리법</h2>
-          <ol className="steps-list">
-            {recipe.steps?.map((step, idx) => (
-              <li key={idx}>
-                <span className="step-number">{step.no}</span>
-                <span className="step-desc">{step.desc}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-
-        {/* 팁 */}
-        {recipe.tips && recipe.tips.length > 0 && (
-          <div className="recipe-section">
-            <h2>💡 팁</h2>
-            <ul className="tips-list">
-              {recipe.tips.map((tip, idx) => (
-                <li key={idx}>{tip}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* 가족 정보 (디버그용 - 나중에 제거 가능) */}
-        <details className="debug-info">
-          <summary>적용된 정보</summary>
-          <div className="debug-content">
-            <p>
-              <strong>대상:</strong> {memberInfo?.names?.join(", ")}
-            </p>
-            <p>
-              <strong>알레르기:</strong> {memberInfo?.allergies?.join(", ")}
-            </p>
-            <p>
-              <strong>비선호:</strong> {memberInfo?.dislikes?.join(", ")}
-            </p>
-            <p>
-              <strong>대화 수:</strong> {chatHistory?.length}개
-            </p>
-          </div>
-        </details>
-      </div>
-
-      {/* 하단 버튼 */}
-      <div className="recipe-actions">
-        <button className="btn-secondary" onClick={() => navigate("/chat")}>
-          새로운 레시피 찾기
-        </button>
-        <button
-          className="btn-primary"
-          onClick={() => {
-            // TODO: 조리 모드로 이동
-            alert("조리 모드는 준비 중입니다!");
+      {/* 레시피 이미지 */}
+      <div className="result-image-wrapper">
+        <img
+          src={recipe.image_url || recipe.img_url || "/images/default-food.jpg"}
+          alt={recipe.title}
+          className="result-image"
+          onError={(e) => {
+            e.target.src = "/images/default-food.jpg";
           }}
-        >
-          조리 시작하기
-        </button>
+        />
+
+        {/* 이미지 위 정보 태그 */}
+        <div className="result-image-info">
+          <div className="info-badge">
+            <img src="/time-icon.png" alt="시간" className="badge-icon" />
+            <span>{recipe.cook_time || "15분"}</span>
+          </div>
+          <div className="info-badge">
+            <img src="/level-icon.png" alt="난이도" className="badge-icon" />
+            <span>{recipe.level || "중급"}</span>
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* 액션 버튼들 */}
+      <div className="result-actions">
+        <div className="result-button-wrapper">
+          <ButtonRed
+            onClick={handleRegenerate}
+            disabled={remainingCount === 0}
+            subText={`${remainingCount}회 남음`}
+          >
+            다시 생성
+          </ButtonRed>
+        </div>
+        <div className="result-button-wrapper">
+          <ButtonWhite onClick={handleStartCooking}>요리 시작하기</ButtonWhite>
+        </div>
+      </div>
+    </RecipeLayout>
   );
 }
