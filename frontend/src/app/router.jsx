@@ -8,9 +8,11 @@ import LoadingPage from "@/pages/Loading/LoadingPage";
 import RecipeResultPage from "@/pages/Recipes/RecipeResultPage";
 import CookModePage from "@/pages/Cook/CookModePage";
 import CookModeAudioPage from "@/pages/Cook/CookModeAudioPage";
+import CookCompletePage from "@/pages/Cook/CookCompletePage";
 import MyRecipesPage from "@/pages/MyRecipes/MyRecipesPage";
 import CookStartPage from "@/pages/Cook/CookStartPage";
 import MyPage from "@/pages/MyPages/MyPage";
+import NaverCallbackPage from "@/pages/NaverCallback/NaverCallbackPage";
 
 import FixedLayout from "@/layouts/FixedLayout";
 import ScrollLayout from "@/layouts/ScrollLayout";
@@ -30,6 +32,9 @@ export default function Router() {
               </FixedLayout>
             }
           />
+
+          {/* 네이버 로그인 콜백 */}
+          <Route path="/naver-callback" element={<NaverCallbackPage />} />
 
           {/* Home - 스크롤 화면 */}
           <Route
@@ -111,13 +116,22 @@ export default function Router() {
             }
           />
 
+          {/* Cook Complete - 요리 완료 페이지 */}
+          <Route
+            path="/cook-complete"
+            element={
+              <FixedLayout>
+                <CookCompletePage />
+              </FixedLayout>
+            }
+          />
+
           {/* 마이 레시피 - 스크롤 화면 */}
           <Route
             path="/recipes/my"
             element={
               <ScrollLayout>
-                {/* TODO: MyRecipesPage 컴포넌트 생성 */}
-                <div>마이 레시피 페이지</div>
+                <MyRecipesPage />
               </ScrollLayout>
             }
           />
@@ -127,8 +141,7 @@ export default function Router() {
             path="/recipes"
             element={
               <ScrollLayout>
-                {/* TODO: AllRecipesPage 컴포넌트 생성 */}
-                <div>전체 레시피 페이지</div>
+                <MyRecipesPage />
               </ScrollLayout>
             }
           />

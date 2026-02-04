@@ -1,67 +1,169 @@
 // src/pages/Chat/ChatPage.jsx
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import ButtonRed from "@/components/ButtonRed";
 import "./ChatPage.css";
 
 export default function ChatPage() {
   const navigate = useNavigate();
-  const [messages, setMessages] = useState([]);
+  const location = useLocation();
+
+  // 재생성 버튼에서 넘어온 경우
+  const {
+    sessionId: existingSessionId,
+    existingMessages,
+    memberInfo: existingMemberInfo,
+    skipToChat,
+    fromRegenerate,
+  } = location.state || {};
+
+  const [messages, setMessages] = useState(existingMessages || []);
   const [input, setInput] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
 
   // 플로우 상태
-  const [flowState, setFlowState] = useState("LOADING"); // LOADING, SELECT_MEMBER, CONFIRM_INFO, FREE_CHAT
+  const [flowState, setFlowState] = useState(
+    skipToChat ? "FREE_CHAT" : existingMessages ? "FREE_CHAT" : "LOADING",
+  );
+
   const [familyMembers, setFamilyMembers] = useState({});
   const [selectedMembers, setSelectedMembers] = useState([]);
-  const [combinedMemberInfo, setCombinedMemberInfo] = useState(null);
+  const [combinedMemberInfo, setCombinedMemberInfo] = useState(
+    existingMemberInfo || null,
+  );
 
   // 레시피 생성 버튼 활성화
-  const [hasRecipeGenerated, setHasRecipeGenerated] = useState(false);
+  const [hasRecipeGenerated, setHasRecipeGenerated] = useState(
+    !!existingMessages || skipToChat,
+  );
 
   const wsRef = useRef(null);
-  const sessionId = useRef(crypto.randomUUID()).current;
+  const sessionIdRef = useRef(existingSessionId || crypto.randomUUID());
+  const sessionId = sessionIdRef.current;
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const API_URL = import.meta.env.VITE_API_URL || "http://211.188.62.72:8080";
   const WS_URL = import.meta.env.VITE_WS_URL || "ws://211.188.62.72:8080";
+
+  // 디버깅용
+  useEffect(() => {
+    console.log("[ChatPage] 세션 ID:", sessionId);
+    console.log("[ChatPage] 재생성 여부:", !!existingSessionId);
+    console.log("[ChatPage] skipToChat:", skipToChat);
+    console.log("[ChatPage] 현재 상태:", flowState);
+  }, [sessionId, existingSessionId, skipToChat, flowState]);
 
   // 스크롤 최하단
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
 
-  // 가족 정보 불러오기
+  // "나"만 자동 선택하고 바로 개인화 정보 표시
   useEffect(() => {
-    console.log("[ChatPage] 가족 정보 로딩 시작...");
+    if (existingMemberInfo || skipToChat) {
+      console.log("[ChatPage] 기존 세션 복원 (skipToChat)");
+      return;
+    }
 
-    fetch(`${API_URL}/api/user/family`)
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("[ChatPage] 가족 정보 받음:", data);
-        setFamilyMembers(data.family_members);
+    console.log("[ChatPage] 개인화 정보 로딩 시작 (나 자동 선택)...");
+
+    // 로그인된 회원 정보 가져오기
+    const memberStr = localStorage.getItem("member");
+    const member = memberStr ? JSON.parse(memberStr) : null;
+    const memberId = member?.id || 0;
+    const memberNickname = member?.nickname || "나";
+
+    // "나"만 자동 선택하여 바로 개인화 정보 로드
+    const loadMyPersonalization = async () => {
+      try {
+        // 본인 개인화 정보 로드
+        const profileRes = await fetch(`${API_URL}/api/user/profile?member_id=${memberId}`);
+        const profileData = await profileRes.json();
+
+        // 조리도구 로드
+        let memberUtensils = [];
+        if (memberId > 0) {
+          const utensilRes = await fetch(`${API_URL}/api/user/all-constraints?member_id=${memberId}`);
+          const utensilData = await utensilRes.json();
+          memberUtensils = utensilData.utensils || [];
+        }
+
+        const combined = {
+          names: ["나"],
+          member_id: memberId,
+          allergies: profileData.allergies || [],
+          dislikes: profileData.dislikes || [],
+          cooking_tools: memberUtensils,
+        };
+
+        setCombinedMemberInfo(combined);
+
+        // 개인화 정보가 있는 항목만 표시
+        let infoLines = [`[ ${memberNickname} ]님을 위한 요리 정보\n`];
+
+        if (combined.allergies.length > 0) {
+          infoLines.push(`- 알레르기: ${combined.allergies.join(", ")}\n`);
+        }
+        if (combined.dislikes.length > 0) {
+          infoLines.push(`- 싫어하는 음식: ${combined.dislikes.join(", ")}\n`);
+        }
+        if (combined.cooking_tools.length > 0) {
+          infoLines.push(`- 사용 가능한 조리도구: ${combined.cooking_tools.join(", ")}\n`);
+        }
+
+        // 개인화 정보 유무 확인
+        const hasPersonalization = combined.allergies.length > 0 || combined.dislikes.length > 0 || combined.cooking_tools.length > 0;
+
+        if (!hasPersonalization) {
+          infoLines.push(`\n아직 등록된 개인화 정보가 없어요.\n마이페이지에서 알레르기, 비선호 음식 등을 등록해보세요!`);
+        } else {
+          infoLines.push(`\n이 정보가 맞나요?`);
+        }
+
+        const infoText = infoLines.join("\n");
 
         setMessages([
           {
             role: "assistant",
-            content:
-              "안녕하세요! 누구를 위한 요리를 만들까요?\n(여러 명 선택 가능)",
+            content: infoText,
             timestamp: new Date().toISOString(),
             showButtons: true,
-            buttonType: "select_member",
+            buttonType: hasPersonalization ? "confirm_info" : "start_cooking",
           },
         ]);
 
-        setFlowState("SELECT_MEMBER");
-      })
-      .catch((err) => {
-        console.error("[ChatPage] 가족 정보 로딩 실패:", err);
-        alert("가족 정보를 불러올 수 없습니다.");
-      });
-  }, [API_URL]);
+        setFlowState("CONFIRM_INFO");
+      } catch (err) {
+        console.error("[ChatPage] 개인화 정보 로딩 실패:", err);
+        // 에러 시에도 요리 시작 가능하도록
+        setCombinedMemberInfo({
+          names: ["나"],
+          member_id: memberId,
+          allergies: [],
+          dislikes: [],
+          cooking_tools: [],
+        });
 
-  // WebSocket 연결 (FREE_CHAT 상태일 때만)
+        setMessages([
+          {
+            role: "assistant",
+            content: "개인화 정보를 불러오지 못했어요.\n그래도 요리를 시작할 수 있어요!",
+            timestamp: new Date().toISOString(),
+            showButtons: true,
+            buttonType: "start_cooking",
+          },
+        ]);
+
+        setFlowState("CONFIRM_INFO");
+      }
+    };
+
+    loadMyPersonalization();
+  }, [API_URL, existingMemberInfo, skipToChat]);
+
+  // WebSocket 연결
   useEffect(() => {
     if (flowState !== "FREE_CHAT") {
       console.log("[ChatPage] WebSocket 대기 중... 현재:", flowState);
@@ -84,15 +186,17 @@ export default function ChatPage() {
           }),
         );
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content:
-              '어떤 요리를 만들고 싶으세요? 자유롭게 말씀해주세요!\n예) "매운 찌개 먹고 싶어요", "간식으로 먹을 요리 알려줘"',
-            timestamp: new Date().toISOString(),
-          },
-        ]);
+        if (!existingMessages && !skipToChat) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                '어떤 요리를 만들고 싶으세요? 자유롭게 말씀해주세요!\n예) "매운 찌개 먹고 싶어요", "간식으로 먹을 요리 알려줘"',
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        }
       }
     };
 
@@ -107,10 +211,23 @@ export default function ChatPage() {
             role: "assistant",
             content: data.content,
             timestamp: new Date().toISOString(),
+            image_url: data.image_url,
           },
         ]);
         setIsThinking(false);
-        setHasRecipeGenerated(true); // AI 답변 오면 버튼 활성화
+        setHasRecipeGenerated(true);
+      } else if (data.type === "not_recipe_related") {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: data.content,
+            timestamp: new Date().toISOString(),
+            showHomeButton: true,
+          },
+        ]);
+        setIsThinking(false);
+        setHasRecipeGenerated(false);
       } else if (data.type === "thinking") {
         setIsThinking(true);
       } else if (data.type === "progress") {
@@ -135,7 +252,14 @@ export default function ChatPage() {
     return () => {
       ws.close();
     };
-  }, [flowState, combinedMemberInfo, sessionId, WS_URL]);
+  }, [
+    flowState,
+    combinedMemberInfo,
+    sessionId,
+    WS_URL,
+    existingMessages,
+    skipToChat,
+  ]);
 
   // 가족 선택
   const handleSelectMember = (memberName) => {
@@ -154,32 +278,86 @@ export default function ChatPage() {
     }
 
     try {
-      const memberInfoPromises = selectedMembers.map((name) =>
-        fetch(`${API_URL}/api/user/family/${name}`).then((r) => r.json()),
-      );
+      // 로그인된 회원 정보
+      const memberStr = localStorage.getItem("member");
+      const member = memberStr ? JSON.parse(memberStr) : null;
+      const memberId = member?.id || 0;
 
-      const allMemberInfo = await Promise.all(memberInfoPromises);
+      // 선택된 멤버들의 개인화 정보 수집
+      const allMemberInfo = [];
+
+      for (const name of selectedMembers) {
+        const info = familyMembers[name];
+        if (!info) continue;
+
+        if (info.type === "member") {
+          // 본인 - /api/user/profile에서 로드
+          const res = await fetch(`${API_URL}/api/user/profile?member_id=${memberId}`);
+          const data = await res.json();
+          allMemberInfo.push({
+            allergies: data.allergies || [],
+            dislikes: data.dislikes || [],
+            cooking_tools: []
+          });
+        } else {
+          // 가족 - /api/user/family/{family_id}에서 로드
+          const res = await fetch(`${API_URL}/api/user/family/${info.id}`);
+          const data = await res.json();
+          allMemberInfo.push({
+            allergies: data.allergies || [],
+            dislikes: data.dislikes || [],
+            cooking_tools: []
+          });
+        }
+      }
+
+      // 조리도구 로드 (회원 전체에 속함)
+      let memberUtensils = [];
+      if (memberId > 0) {
+        const utensilRes = await fetch(`${API_URL}/api/user/all-constraints?member_id=${memberId}`);
+        const utensilData = await utensilRes.json();
+        memberUtensils = utensilData.utensils || [];
+      }
 
       const combined = {
         names: selectedMembers,
+        member_id: memberId,
         allergies: [
           ...new Set(allMemberInfo.flatMap((m) => m.allergies || [])),
         ],
         dislikes: [...new Set(allMemberInfo.flatMap((m) => m.dislikes || []))],
-        cooking_tools: [
-          ...new Set(allMemberInfo.flatMap((m) => m.cooking_tools || [])),
-        ],
+        cooking_tools: memberUtensils,
       };
 
       setCombinedMemberInfo(combined);
 
       const namesText = selectedMembers.join(", ");
-      const infoText =
-        `[ ${namesText} ]님을 위한 요리 정보\n\n` +
-        `- 알레르기: ${combined.allergies.join(", ") || "없음"}\n\n` +
-        `- 싫어하는 음식: ${combined.dislikes.join(", ") || "없음"}\n\n` +
-        `- 사용 가능한 조리도구\n: ${combined.cooking_tools.join(", ")}\n\n` +
-        `이 정보가 맞나요?`;
+
+      // 개인화 정보가 있는 항목만 표시
+      let infoLines = [`[ ${namesText} ]님을 위한 요리 정보\n`];
+
+      if (combined.allergies.length > 0) {
+        infoLines.push(`- 알레르기: ${combined.allergies.join(", ")}\n`);
+      }
+      if (combined.dislikes.length > 0) {
+        infoLines.push(`- 싫어하는 음식: ${combined.dislikes.join(", ")}\n`);
+      }
+      if (combined.cooking_tools.length > 0) {
+        infoLines.push(`- 사용 가능한 조리도구: ${combined.cooking_tools.join(", ")}\n`);
+      }
+
+      // 개인화 정보 유무 확인
+      const hasPersonalization = combined.allergies.length > 0 || combined.dislikes.length > 0 || combined.cooking_tools.length > 0;
+
+      if (!hasPersonalization) {
+        // 개인화 정보 없음 - 안내 메시지만
+        infoLines.push(`\n아직 등록된 개인화 정보가 없어요.\n마이페이지에서 알레르기, 비선호 음식 등을 등록해보세요!`);
+      } else {
+        // 개인화 정보 있음 - 확인 질문
+        infoLines.push(`\n이 정보가 맞나요?`);
+      }
+
+      const infoText = infoLines.join("\n");
 
       setMessages((prev) => [
         ...prev,
@@ -192,8 +370,8 @@ export default function ChatPage() {
           role: "assistant",
           content: infoText,
           timestamp: new Date().toISOString(),
-          showButtons: true,
-          buttonType: "confirm_info",
+          showButtons: true,  // 항상 버튼 표시
+          buttonType: hasPersonalization ? "confirm_info" : "start_cooking",  // 개인화 정보 없으면 바로 시작 버튼
         },
       ]);
 
@@ -206,17 +384,22 @@ export default function ChatPage() {
 
   // 정보 확인
   const handleConfirmInfo = (confirmed) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "user",
-        content: confirmed ? "예, 맞아요" : "아니오, 수정이 필요해요",
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+    if (confirmed) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "user",
+          content: "예, 맞아요",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
 
-    setFlowState("FREE_CHAT");
-    console.log("[ChatPage] 자유 대화 상태로 전환");
+      setFlowState("FREE_CHAT");
+      console.log("[ChatPage] 자유 대화 상태로 전환");
+    } else {
+      console.log("[ChatPage] 마이페이지로 이동");
+      navigate("/mypage");
+    }
   };
 
   // 메시지 전송
@@ -254,16 +437,27 @@ export default function ChatPage() {
       (m) => m.role && m.content && typeof m.content === "string",
     );
 
-    console.log("[ChatPage] 레시피 생성 시작...");
-    console.log("- 대화 수:", validMessages.length);
-    console.log("- 가족:", combinedMemberInfo.names);
+    console.log("[ChatPage] 레시피 생성 버튼 클릭");
 
     navigate("/loading", {
       state: {
         memberInfo: combinedMemberInfo,
         chatHistory: validMessages,
+        sessionId: sessionId,
+        isRegeneration: !!fromRegenerate,
       },
     });
+  };
+
+  // textarea 자동 높이 조절
+  const handleTextareaChange = (e) => {
+    setInput(e.target.value);
+
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "48px";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+    }
   };
 
   return (
@@ -292,7 +486,30 @@ export default function ChatPage() {
                 <div className="bubble">{msg.content}</div>
               </div>
 
-              {/* 가족 선택 버튼 */}
+              {msg.image && (
+                <div className="message-image-wrapper">
+                  <img
+                    src={msg.image}
+                    alt="레시피 이미지"
+                    className="message-recipe-image"
+                    onError={(e) => {
+                      e.target.style.display = "none";
+                    }}
+                  />
+                </div>
+              )}
+
+              {msg.showHomeButton && (
+                <div className="home-button-wrapper">
+                  <button
+                    className="btn-confirm-selection"
+                    onClick={() => navigate("/home")}
+                  >
+                    외부 챗봇으로 이동
+                  </button>
+                </div>
+              )}
+
               {msg.showButtons && msg.buttonType === "select_member" && (
                 <div className="selection-area">
                   <div className="button-group">
@@ -317,7 +534,6 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* 정보 확인 버튼 */}
               {msg.showButtons && msg.buttonType === "confirm_info" && (
                 <div className="button-group confirm-group">
                   <button
@@ -330,7 +546,18 @@ export default function ChatPage() {
                     className="btn-option btn-edit"
                     onClick={() => handleConfirmInfo(false)}
                   >
-                    아니오, 수정이 필요해요
+                    수정이 필요해요
+                  </button>
+                </div>
+              )}
+
+              {msg.showButtons && msg.buttonType === "start_cooking" && (
+                <div className="button-group confirm-group">
+                  <button
+                    className="btn-option btn-confirm"
+                    onClick={() => handleConfirmInfo(true)}
+                  >
+                    요리 시작하기
                   </button>
                 </div>
               )}
@@ -354,7 +581,7 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* 레시피 생성 버튼 - AI 답변 오면 활성화 */}
+      {/* 레시피 생성 버튼 */}
       {flowState === "FREE_CHAT" && (
         <div className="action-area">
           <ButtonRed
@@ -369,13 +596,19 @@ export default function ChatPage() {
       {/* 입력창 */}
       {flowState === "FREE_CHAT" && (
         <div className="chat-input-area">
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleSend()}
+            onChange={handleTextareaChange}
+            onKeyPress={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder={isConnected ? "어떤 요리를 원하세요?" : "연결 중..."}
             disabled={!isConnected || isThinking}
+            rows={1}
           />
           <button
             onClick={handleSend}
